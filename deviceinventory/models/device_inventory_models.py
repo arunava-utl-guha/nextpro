@@ -10,6 +10,8 @@ class DeviceInventory(SoftDeletionModel):
         ('assigned', 'Assigned'),
         ('faulty', 'Faulty'),
         ('maintenance', 'Maintenance'),
+        ('active', 'Active'),
+        ('Inactive', 'Inactive'),
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

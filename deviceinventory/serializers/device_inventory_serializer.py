@@ -22,5 +22,5 @@ class DeviceInventorySerializer(serializers.ModelSerializer):
         # Define which fields should be included in the serialization
         # Comprehensive list covering taxonomic and location-related information
         fields = ('id', 'device_mac_id', 'device_type', 'qr_code',
-            'serial_number', 'firmware_version', 'status', 'organization',
+            'serial_number', 'firmware_version', 'status', 'is_active', 'organization',
             'organization_name', 'created_at', 'assigned_at', 'last_health_check')
