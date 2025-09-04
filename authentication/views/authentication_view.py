@@ -224,7 +224,7 @@ class UserDetails(APIView):
         """
         try:
             # Get the user from User table using user_id (UUID primary key)
-            user = User.objects.filter(user_id=id).first()
+            user = User.objects.filter(id=id).first()
             if not user:
                 return Response({
                     'status': False, 
@@ -233,7 +233,7 @@ class UserDetails(APIView):
             
             # Build user data from User model fields
             data = {
-                'user_id': str(user.user_id),
+                'id': str(user.id),
                 'username': user.username,
                 'email': user.email,
                 'full_name': user.full_name,
