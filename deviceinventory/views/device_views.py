@@ -7,6 +7,9 @@ from django.db.models import Q  # Complex database query lookups
 from django.db import IntegrityError  # Database integrity error handling
 from ..models.device_inventory_models import *  # Device inventory model
 from ..serializers.device_inventory_serializer import *  # Device serializer
+import csv
+import io
+from django.db import transaction
 
 
 class AddDeviceView(APIView):
@@ -311,3 +314,199 @@ class DeviceSetStatusView(APIView):
                 'status': False,
                 'message': f'Error setting device status: {str(error)}'
             }, status=status.HTTP_400_BAD_REQUEST)
+        
+
+
+
+class BulkDeviceCSVUploadView(APIView):
+    """
+    API view to bulk upload devices from CSV file
+    """
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        """
+        Upload CSV file and bulk create devices
+        """
+        try:
+            # Check if file was uploaded
+            if 'csv_file' not in request.FILES:
+                return Response({
+                    'status': False,
+                    'message': 'No CSV file uploaded. Please upload a file with key "csv_file"'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            csv_file = request.FILES['csv_file']
+            
+            # Validate file type
+            if not csv_file.name.endswith('.csv'):
+                return Response({
+                    'status': False,
+                    'message': 'Invalid file type. Please upload a CSV file'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Validate file size (limit to 5MB)
+            if csv_file.size > 5 * 1024 * 1024:
+                return Response({
+                    'status': False,
+                    'message': 'File too large. Maximum size is 5MB'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Read and decode CSV file
+            try:
+                csv_data = csv_file.read().decode('utf-8')
+            except UnicodeDecodeError:
+                return Response({
+                    'status': False,
+                    'message': 'Invalid file encoding. Please use UTF-8 encoded CSV file'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Parse CSV data
+            csv_reader = csv.DictReader(io.StringIO(csv_data))
+            
+            # Validate CSV headers
+            required_headers = ['device_mac_id', 'device_type']
+            optional_headers = ['serial_number', 'qr_code', 'firmware_version', 'status']
+            all_headers = required_headers + optional_headers
+            
+            if not all(header in csv_reader.fieldnames for header in required_headers):
+                missing_headers = [h for h in required_headers if h not in csv_reader.fieldnames]
+                return Response({
+                    'status': False,
+                    'message': f'Missing required CSV headers: {", ".join(missing_headers)}',
+                    'required_headers': required_headers,
+                    'optional_headers': optional_headers,
+                    'found_headers': csv_reader.fieldnames
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Process CSV rows
+            devices_to_create = []
+            validation_errors = []
+            row_number = 1  # Start from 1 (excluding header)
+            
+            for row in csv_reader:
+                row_number += 1
+                row_errors = {}
+                
+                # Extract and validate data for each row
+                device_mac_id = str(row.get('device_mac_id', '')).strip().upper()
+                device_type = str(row.get('device_type', '')).strip()
+                serial_number = str(row.get('serial_number', '')).strip()
+                qr_code = str(row.get('qr_code', '')).strip()
+                firmware_version = str(row.get('firmware_version', '')).strip()
+                device_status = str(row.get('status', 'available')).strip().lower()
+                
+                # Validate required fields
+                if not device_mac_id or device_mac_id == 'NONE':
+                    row_errors['device_mac_id'] = 'This field is required'
+                elif not self.is_valid_mac_address(device_mac_id):
+                    row_errors['device_mac_id'] = 'Invalid MAC address format'
+                
+                if not device_type or device_type == 'None':
+                    row_errors['device_type'] = 'This field is required'
+                
+                # Validate status
+                valid_statuses = ['available', 'assigned', 'faulty', 'maintenance', 'active', 'inactive']
+                if device_status not in valid_statuses:
+                    row_errors['status'] = f'Invalid status. Must be one of: {", ".join(valid_statuses)}'
+                
+                # Check for duplicates in current batch
+                existing_macs = [d['device_mac_id'] for d in devices_to_create]
+                if device_mac_id in existing_macs:
+                    row_errors['device_mac_id'] = 'Duplicate MAC address in CSV file'
+                
+                if serial_number and serial_number != 'None':
+                    existing_serials = [d['serial_number'] for d in devices_to_create if d.get('serial_number')]
+                    if serial_number in existing_serials:
+                        row_errors['serial_number'] = 'Duplicate serial number in CSV file'
+                
+                if qr_code and qr_code != 'None':
+                    existing_qrs = [d['qr_code'] for d in devices_to_create if d.get('qr_code')]
+                    if qr_code in existing_qrs:
+                        row_errors['qr_code'] = 'Duplicate QR code in CSV file'
+                
+                # Check for duplicates in database
+                if not row_errors.get('device_mac_id') and DeviceInventory.objects.filter(device_mac_id=device_mac_id).exists():
+                    row_errors['device_mac_id'] = 'Device with this MAC address already exists in database'
+                
+                if serial_number and serial_number != 'None' and DeviceInventory.objects.filter(serial_number=serial_number).exists():
+                    row_errors['serial_number'] = 'Device with this serial number already exists in database'
+                
+                if qr_code and qr_code != 'None' and DeviceInventory.objects.filter(qr_code=qr_code).exists():
+                    row_errors['qr_code'] = 'Device with this QR code already exists in database'
+                
+                if row_errors:
+                    validation_errors.append({
+                        'row': row_number,
+                        'data': row,
+                        'errors': row_errors
+                    })
+                else:
+                    # Prepare device data
+                    device_data = {
+                        'device_mac_id': device_mac_id,
+                        'device_type': device_type,
+                        'status': device_status
+                    }
+                    
+                    # Add optional fields if provided
+                    if serial_number and serial_number != 'None':
+                        device_data['serial_number'] = serial_number
+                    if qr_code and qr_code != 'None':
+                        device_data['qr_code'] = qr_code
+                    if firmware_version and firmware_version != 'None':
+                        device_data['firmware_version'] = firmware_version
+                    
+                    devices_to_create.append(device_data)
+
+            # If there are validation errors, return them
+            if validation_errors:
+                return Response({
+                    'status': False,
+                    'message': f'Validation failed for {len(validation_errors)} rows',
+                    'total_rows': row_number - 1,
+                    'valid_rows': len(devices_to_create),
+                    'invalid_rows': len(validation_errors),
+                    'errors': validation_errors
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # If no devices to create
+            if not devices_to_create:
+                return Response({
+                    'status': False,
+                    'message': 'No valid devices found in CSV file'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Bulk create devices using transaction
+            created_devices = []
+            with transaction.atomic():
+                for device_data in devices_to_create:
+                    device = DeviceInventory.objects.create(**device_data)
+                    created_devices.append({
+                        'id': str(device.id),
+                        'device_mac_id': device.device_mac_id,
+                        'device_type': device.device_type,
+                        'serial_number': device.serial_number,
+                        'qr_code': device.qr_code,
+                        'firmware_version': device.firmware_version,
+                        'status': device.status,
+                        'created_at': device.created_at.isoformat()
+                    })
+
+            return Response({
+                'status': True,
+                'message': f'Successfully created {len(created_devices)} devices',
+                'summary': {
+                    'total_rows_processed': row_number - 1,
+                    'devices_created': len(created_devices),
+                    'devices_failed': 0
+                },
+                'created_devices': created_devices
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as error:
+            return Response({
+                'status': False,
+                'message': f'Error processing CSV file: {str(error)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
