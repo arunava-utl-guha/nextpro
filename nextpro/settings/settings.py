@@ -2,6 +2,7 @@ import os
 import datetime
 from pathlib import Path
 from decouple import config
+from urllib.parse import urlparse, parse_qsl
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -60,15 +61,18 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'nextpro.wsgi.application'
 
+# Replace the DATABASES section of your settings.py with this
+tmpPostgres = urlparse(config('DATABASE_URL', default='postgres://postgres:password@localhost:5432/nextpro_db'))
+
 # Database
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('DB_NAME', default='nextpro_db'),
-        'USER': config('DB_USER', default='postgres'),
-        'PASSWORD': config('DB_PASSWORD', default='password'),
-        'HOST': config('DB_HOST', default='localhost'),
-        'PORT': config('DB_PORT', default='5432'),
+        'NAME': tmpPostgres.path.replace('/', ''),
+        'USER': tmpPostgres.username,
+        'PASSWORD': tmpPostgres.password,
+        'HOST': tmpPostgres.hostname,
+        'PORT': 5432,
     }
 }
 
