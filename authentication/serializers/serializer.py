@@ -7,12 +7,7 @@ from ..models import *
 # Importing translation utility from Django
 from django.utils.translation import gettext_lazy as _
 
-# Importing Django authentication utilities
-from django.contrib.auth import authenticate
-from django.contrib.auth.password_validation import validate_password
-from django.core.exceptions import ValidationError
-from django.contrib.auth.hashers import make_password, check_password
-from authentication.models.user import User
+from authentication.models import User
 
 # Defining UserSerializer class inheriting from serializers.ModelSerializer
 class UserSerializer(serializers.ModelSerializer):
@@ -30,10 +25,8 @@ class UserSerializer(serializers.ModelSerializer):
         
         # Defining the fields to be included in the serialization
         fields = (
-            'user_id', 'username', 'email', 'full_name', 'phone_number', 
-            'user_type', 'status', 'organization_id', 'subscription_details', 
-            'emergency_contact', 'profile_image_url', 'created_at', 
-            'last_login', 'is_active', 'created_by'
+            'id', 'username', 'email', 'password_hash',
+            'full_name', 'permissions', 'status', 'created_at', 'last_login', 'updated_at'
         )
         # Making the password write-only
         extra_kwargs = {'password': {'write_only': True}}
