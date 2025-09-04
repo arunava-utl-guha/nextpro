@@ -247,7 +247,6 @@ class UserDetails(APIView):
                 'created_at': user.created_at,
                 'last_login': user.last_login,
                 'is_active': user.is_active,
-                'is_staff': user.is_staff,
                 'created_by': str(user.created_by) if user.created_by else None,
             }
 
